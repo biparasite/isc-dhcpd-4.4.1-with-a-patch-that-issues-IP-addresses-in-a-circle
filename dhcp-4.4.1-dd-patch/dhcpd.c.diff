@@ -1,0 +1,27 @@
+--- server/dhcpd.c.orig	2018-02-21 17:30:46.000000000 +0300
++++ server/dhcpd.c	2019-01-14 17:52:53.981763000 +0300
+@@ -57,6 +57,7 @@
+ gid_t set_gid = 0;
+ #endif /* PARANOIA */
+ 
++int flag_dd_option = 0;
+ struct class unknown_class;
+ struct class known_class;
+ 
+@@ -183,6 +184,7 @@
+ 
+ #define DHCPD_USAGEC \
+ "             [-pf pid-file] [--no-pid] [-s server]\n" \
++"             [-dd] - enable dd mode\n" \
+ "             [if0 [...ifN]]"
+ 
+ #define DHCPD_USAGEH "{--version|--help|-h}"
+@@ -460,6 +462,8 @@
+ 				usage(use_noarg, argv[i-1]);
+ 			set_chroot = argv [i];
+ #endif /* PARANOIA */
++		} else if (!strcmp (argv [i], "-dd")) {
++			flag_dd_option = 1;
+ 		} else if (!strcmp (argv [i], "-cf")) {
+ 			if (++i == argc)
+ 				usage(use_noarg, argv[i-1]);
