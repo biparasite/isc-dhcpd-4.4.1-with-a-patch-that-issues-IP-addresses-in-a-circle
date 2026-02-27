@@ -195,14 +195,14 @@ spec:
   ingress:
     - from:
         - ipBlock:
-            cidr: 10.30.0.0/20
+            cidr: IP_NET_DHCP_RELAY #10.0.0.0/24
       ports:
         - protocol: UDP
           port: 67
   egress:
     - to:
         - ipBlock:
-            cidr: 10.30.0.0/20
+            cidr: IP_NET_DHCP_RELAY #10.0.0.0/24
       ports:
         - protocol: UDP
           port: 67
