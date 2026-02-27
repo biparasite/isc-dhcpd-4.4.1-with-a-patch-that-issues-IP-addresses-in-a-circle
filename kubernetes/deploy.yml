@@ -1,0 +1,213 @@
+```bash
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: isc-dhcpd
+  namespace: isc-dhcpd
+  labels:
+    app: isc-dhcpd
+spec:
+  serviceName: isc-dhcpd
+  replicas: 3
+  minReadySeconds: 60
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: isc-dhcpd
+  template:
+    metadata:
+      labels:
+        app: isc-dhcpd
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                      - isc-dhcpd
+              topologyKey: kubernetes.io/hostname
+      initContainers:
+        - name: create-dirs
+          image: busybox
+          command:
+            [
+              "sh",
+              "-c",
+              "mkdir -p /var/lib/dhcp && touch /var/lib/dhcp/dhcpd.leases && touch /tmp/dhcpd.pid",
+            ]
+          volumeMounts:
+            - name: dhcp-leases
+              mountPath: /var/lib/dhcp
+      containers:
+        - name: isc-dhcpd
+          image: biparasite/isc-dhcpd:4.4.1-dd-amd64-5
+          imagePullPolicy: IfNotPresent
+          args:
+            - "-f"
+            - "-4"
+            - "-d"
+            - "-dd"
+            - "-cf"
+            - "/etc/dhcp/dhcpd.conf"
+            - "-lf"
+            - "/var/lib/dhcp/dhcpd.leases"
+            - "-pf"
+            - "/tmp/dhcpd.pid"
+            - "eth0"
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            privileged: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              add: ["NET_BIND_SERVICE", "NET_RAW"] # NET_ADMIN если реально нужен
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests:
+              cpu: "1"
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 256Mi
+          ports:
+            - name: dhcp-server-udp
+              containerPort: 67
+              protocol: UDP
+            - name: dhcp-client-udp
+              containerPort: 68
+              protocol: UDP
+          volumeMounts:
+            - name: dhcp-config-host
+              mountPath: /etc/dhcp/dhcpd.conf
+              subPath: dhcpd.conf
+              readOnly: true
+            - name: dhcp-leases
+              mountPath: /var/lib/dhcp/
+            - name: dhcp-tmp
+              mountPath: /tmp
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "grep -q dhcpd /proc/1/comm"
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "test -r /etc/dhcp/dhcpd.conf && test -w /var/lib/dhcp && grep -q dhcpd /proc/1/comm"
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+      volumes:
+        - name: dhcp-config-host
+          hostPath:
+            path: /etc/dhcp
+            type: Directory
+        - name: dhcp-tmp
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: dhcp-leases
+      spec:
+        storageClassName: piraeus-storage
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: isc-dhcpd
+  namespace: isc-dhcpd
+  labels:
+    app: isc-dhcpd
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Local
+  selector:
+    app: isc-dhcpd
+  ports:
+    - name: dhcp-server-udp
+      protocol: UDP
+      port: 67
+      targetPort: 67
+    - name: dhcp-client-udp
+      protocol: UDP
+      port: 68
+      targetPort: 68
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  namespace: isc-dhcpd
+  name: isc-dhcpd-pdb
+  labels:
+    app: isc-dhcpd
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: isc-dhcpd
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: isc-dhcpd-default-deny
+  namespace: isc-dhcpd
+spec:
+  podSelector:
+    matchLabels:
+      app: isc-dhcpd
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: isc-dhcpd-allow-relay
+  namespace: isc-dhcpd
+spec:
+  podSelector:
+    matchLabels:
+      app: isc-dhcpd
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 10.30.0.0/20
+      ports:
+        - protocol: UDP
+          port: 67
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 10.30.0.0/20
+      ports:
+        - protocol: UDP
+          port: 67
+        - protocol: UDP
+          port: 68
+
+```
